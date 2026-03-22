@@ -1,4 +1,4 @@
-package com.zcode.spphomeautomate
+package com.example.spphomeautomate
 
 import io.flutter.embedding.android.FlutterActivity
 
