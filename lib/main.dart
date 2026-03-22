@@ -1,5 +1,3 @@
-import 'dart:ffi';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -61,26 +59,66 @@ class _HomePageState extends State<HomePage> {
 
   @override
   void dispose() {
-    if (isConnected) {
-      connection?.dispose();
-      connection = null;
-    }
+    _disconnect();
     super.dispose();
   }
 
   void _connect(BluetoothDevice device) async {
+    if (isConnected) {
+      await _disconnect();
+    }
+
     setState(() {
       isConnecting = true;
       server = device;
     });
 
     try {
-      BluetoothConnection conn = await BluetoothConnection.toAddress(device.address);
+      // 1. Ensure Bluetooth is enabled
+      bool? isEnabled = await FlutterBluetoothSerial.instance.isEnabled;
+      if (isEnabled != true) {
+        await FlutterBluetoothSerial.instance.requestEnable();
+      }
+
+      // 2. Cancel discovery before pairing/connecting.
+      // Many SPP modules reject connections while the phone is scanning.
+      debugPrint('Canceling discovery...');
+      await FlutterBluetoothSerial.instance.cancelDiscovery();
+
+      // 3. Ensure the device is bonded before attempting SPP connection.
+      // Connecting to an unpaired device often fails with "read failed".
+      final bondState = await FlutterBluetoothSerial.instance
+          .getBondStateForAddress(device.address);
+      if (bondState != BluetoothBondState.bonded) {
+        debugPrint('Bonding with ${device.address}...');
+        final bonded = await FlutterBluetoothSerial.instance
+            .bondDeviceAtAddress(device.address);
+        if (bonded != true) {
+          throw Exception('Pairing failed or was canceled');
+        }
+      }
+
+      // 4. Give the Bluetooth stack a moment to stabilize
+      await Future.delayed(const Duration(milliseconds: 1000));
+
+      debugPrint('Connecting to ${device.address}...');
+
+      // 5. Attempt connection with a timeout
+      BluetoothConnection conn = await BluetoothConnection.toAddress(device.address)
+          .timeout(const Duration(seconds: 15));
+      
       setState(() {
         connection = conn;
         isConnecting = false;
       });
-      
+
+      connection!.input!.listen(_onDataReceived).onDone(() {
+        debugPrint('Disconnected by remote device');
+        setState(() {
+          connection = null;
+        });
+      });
+
       // Save for next time
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.setString('last_device_address', device.address);
@@ -90,14 +128,31 @@ class _HomePageState extends State<HomePage> {
     } catch (exception) {
       setState(() {
         isConnecting = false;
+        connection = null;
       });
       debugPrint('Cannot connect, exception occurred: $exception');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Connection failed: $exception'),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Retry',
+              onPressed: () => _connect(device),
+            ),
+          ),
+        );
+      }
     }
   }
 
-  void _disconnect() {
-    if (isConnected) {
-      connection?.dispose();
+  void _onDataReceived(Uint8List data) {
+    debugPrint('Data received: ${utf8.decode(data)}');
+  }
+
+  Future<void> _disconnect() async {
+    if (connection != null) {
+      await connection!.close(); // Use close() for cleaner shutdown
       setState(() {
         connection = null;
       });
@@ -106,8 +161,14 @@ class _HomePageState extends State<HomePage> {
 
   void _sendMessage(int signal) async {
     if (isConnected) {
-      connection!.output.add(Uint8List.fromList(utf8.encode(signal.toString() + "\r\n")));
-      await connection!.output.allSent;
+      try {
+        // Many HC-05 Arduino codes expect a newline to process a command
+        connection!.output.add(Uint8List.fromList(utf8.encode("$signal\n")));
+        await connection!.output.allSent;
+      } catch (e) {
+        debugPrint("Error sending message: $e");
+        _disconnect();
+      }
     }
   }
 

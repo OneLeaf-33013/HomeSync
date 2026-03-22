@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bluetooth_serial/flutter_bluetooth_serial.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'dart:async';
 
 class BluetoothScanView extends StatefulWidget {
   const BluetoothScanView({super.key});
@@ -11,69 +10,90 @@ class BluetoothScanView extends StatefulWidget {
 }
 
 class _BluetoothScanViewState extends State<BluetoothScanView> {
-  List<BluetoothDiscoveryResult> results = [];
-  bool isDiscovering = false;
-  StreamSubscription<BluetoothDiscoveryResult>? _discoveryStreamSubscription;
+  List<BluetoothDevice> devices = [];
+  bool isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    _checkPermissionsAndStart();
+    _checkPermissionsAndLoad();
   }
 
-  Future<void> _checkPermissionsAndStart() async {
-    // Request permissions for Bluetooth Scan, Connect and Location
+  Future<void> _checkPermissionsAndLoad() async {
+    final isEnabled = await FlutterBluetoothSerial.instance.isEnabled;
+    if (isEnabled != true) {
+      await FlutterBluetoothSerial.instance.requestEnable();
+      final enabledAfterRequest =
+          await FlutterBluetoothSerial.instance.isEnabled;
+      if (enabledAfterRequest != true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Please enable Bluetooth first.')),
+          );
+        }
+        return;
+      }
+    }
+
+    // Request permissions for Bluetooth Connect (paired devices list)
     Map<Permission, PermissionStatus> statuses = await [
-      Permission.bluetoothScan,
       Permission.bluetoothConnect,
-      Permission.location,
     ].request();
 
-    if (statuses[Permission.bluetoothScan] == PermissionStatus.granted &&
-        statuses[Permission.bluetoothConnect] == PermissionStatus.granted) {
-      _startDiscovery();
+    if (statuses[Permission.bluetoothConnect] == PermissionStatus.granted) {
+      await _loadBondedDevices();
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Bluetooth Scan and Connect permissions are required.'),
+            content: Text('Bluetooth Connect permission is required.'),
           ),
         );
       }
     }
   }
 
-  void _startDiscovery() {
-    if (isDiscovering) return;
-
+  Future<void> _loadBondedDevices() async {
     setState(() {
-      results.clear();
-      isDiscovering = true;
+      devices.clear();
+      isLoading = true;
     });
 
-    _discoveryStreamSubscription =
-        FlutterBluetoothSerial.instance.startDiscovery().listen((r) {
-      setState(() {
-        final existingIndex = results.indexWhere(
-            (element) => element.device.address == r.device.address);
-        if (existingIndex >= 0) {
-          results[existingIndex] = r;
-        } else {
-          results.add(r);
-        }
-      });
-    });
+    try {
+      final bonded = await FlutterBluetoothSerial.instance.getBondedDevices();
+      debugPrint('Bonded devices count: ${bonded.length}');
+      for (final d in bonded) {
+        debugPrint(
+          'Bonded: name=${d.name ?? "unknown"} addr=${d.address} '
+          'type=${d.type} bond=${d.bondState} connected=${d.isConnected}',
+        );
+      }
 
-    _discoveryStreamSubscription?.onDone(() {
-      setState(() {
-        isDiscovering = false;
+      bonded.sort((a, b) {
+        final aName = (a.name ?? '').toLowerCase();
+        final bName = (b.name ?? '').toLowerCase();
+        if (aName != bName) return aName.compareTo(bName);
+        return a.address.compareTo(b.address);
       });
-    });
+
+      if (mounted) {
+        setState(() {
+          devices = bonded;
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to load paired devices: $e')),
+        );
+      }
+    }
   }
 
   @override
   void dispose() {
-    _discoveryStreamSubscription?.cancel();
     super.dispose();
   }
 
@@ -81,9 +101,9 @@ class _BluetoothScanViewState extends State<BluetoothScanView> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Bluetooth Classic Scan'),
+        title: const Text('Paired Bluetooth Devices'),
         actions: [
-          if (isDiscovering)
+          if (isLoading)
             const Center(
               child: Padding(
                 padding: EdgeInsets.all(16.0),
@@ -93,28 +113,38 @@ class _BluetoothScanViewState extends State<BluetoothScanView> {
           else
             IconButton(
               icon: const Icon(Icons.replay),
-              onPressed: _checkPermissionsAndStart,
+              onPressed: _checkPermissionsAndLoad,
             )
+          ,
+          IconButton(
+            icon: const Icon(Icons.settings_bluetooth),
+            onPressed: () => FlutterBluetoothSerial.instance.openSettings(),
+          ),
         ],
       ),
-      body: ListView.builder(
-        itemCount: results.length,
-        itemBuilder: (context, index) {
-          BluetoothDiscoveryResult result = results[index];
-          final device = result.device;
-          return ListTile(
-            title: Text(device.name ?? "Unknown Device"),
-            subtitle: Text(device.address),
-            trailing: ElevatedButton(
-              child: const Text('Connect'),
-              onPressed: () {
-                // Return the selected device to the previous screen
-                Navigator.of(context).pop(device);
+      body: devices.isEmpty
+          ? const Center(
+              child: Text('No paired devices. Pair in Bluetooth settings and refresh.'),
+            )
+          : ListView.builder(
+              itemCount: devices.length,
+              itemBuilder: (context, index) {
+                final device = devices[index];
+                final typeLabel = device.type.toString().replaceFirst('BluetoothDeviceType.', '');
+                final bondLabel = device.bondState.toString().replaceFirst('BluetoothBondState.', '');
+                return ListTile(
+                  title: Text(device.name ?? "Unknown Device"),
+                  subtitle: Text('${device.address} • $typeLabel • $bondLabel'),
+                  trailing: ElevatedButton(
+                    child: const Text('Connect'),
+                    onPressed: () {
+                      // Return the selected device to the previous screen
+                      Navigator.of(context).pop(device);
+                    },
+                  ),
+                );
               },
             ),
-          );
-        },
-      ),
     );
   }
 }
