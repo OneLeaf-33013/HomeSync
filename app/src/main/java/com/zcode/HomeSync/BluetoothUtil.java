@@ -1,4 +1,4 @@
-package de.kai_morich.simple_bluetooth_terminal;
+package com.zcode.HomeSync;
 
 import android.Manifest;
 import android.annotation.SuppressLint;

@@ -1,6 +1,22 @@
 <resources>
-    <string name="app_name">Simple Bluetooth Terminal</string>
-    <string name="devices">Bluetooth Devices</string>
+    <string name="app_name">HomeSync</string>
+    <string name="devices">Paired Devices</string>
+    <string name="control_panel_label">HomeSync</string>
+    <string name="control_panel_title">Device Control</string>
+    <string name="device_label">Connected device</string>
+    <string name="button_zero">Send 0</string>
+    <string name="button_one">Send 1</string>
+    <string name="button_two">Send 2</string>
+    <string name="last_command_label">Last command</string>
+    <string name="last_response_label">Last response</string>
+    <string name="no_command_yet">No command sent yet</string>
+    <string name="no_response_yet">Waiting for device response</string>
+    <string name="background_notification">Background notification</string>
+    <string name="not_connected">Not connected</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_connected">Connected</string>
+    <string name="status_connection_failed">Connection failed: %1$s</string>
+    <string name="status_connection_lost">Connection lost: %1$s</string>
 
     <string name="bluetooth_permission_title">Bluetooth permission</string>
     <string name="bluetooth_permission_grant">Bluetooth permission is required by this App. Please grant in next dialog.</string>

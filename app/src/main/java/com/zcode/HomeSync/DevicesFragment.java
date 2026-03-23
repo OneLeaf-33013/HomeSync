@@ -1,4 +1,4 @@
-package de.kai_morich.simple_bluetooth_terminal;
+package com.zcode.HomeSync;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
@@ -116,8 +116,7 @@ public class DevicesFragment extends ListFragment {
             }
             if(!permissionMissing) {
                 for (BluetoothDevice device : bluetoothAdapter.getBondedDevices())
-                    if (device.getType() != BluetoothDevice.DEVICE_TYPE_LE)
-                        listItems.add(device);
+                    listItems.add(device);
                 Collections.sort(listItems, BluetoothUtil::compareTo);
             }
         }
