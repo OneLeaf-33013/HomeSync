@@ -34,6 +34,16 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
     
     var targetCharacteristic: CBCharacteristic?
     
+    // Door sensor variables
+    @Published var doorUltrasonicCM: Double? = nil
+    @Published var doorMotionDetected: Bool? = nil
+    // Temperature sensor variables
+    @Published var temperatureDegrees: Double? = nil
+    @Published var humidityPercent: Double? = nil
+    // Single-value Boolean (flag for 0 or 1)
+    @Published var singleBinaryFlag: Bool? = nil
+    
+    
     override init() {
         super.init()
         centralManager = CBCentralManager(delegate: self, queue: nil)
@@ -41,12 +51,16 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
     
     // MARK: - Scan
     func startScan() {
-        defer {
-            finishedScan = true
-        }
         finishedScan = false
         peripherals.removeAll()
         centralManager.scanForPeripherals(withServices: nil, options: nil)
+        
+        // End the scan after a short window so the UI can accurately reflect scan progress.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self else { return }
+            self.centralManager.stopScan()
+            self.finishedScan = true
+        }
     }
     
     // MARK: - Connect
@@ -55,13 +69,24 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
         centralManager.connect(peripheral, options: nil)
     }
     
+    func disconnect() {
+        guard let peripheral = connectedPeripheral else {
+            print("Cannot disconnect: No device connected")
+            return
+        }
+        centralManager.cancelPeripheralConnection(peripheral)
+        self.connectedPeripheral = nil
+    }
+    
     // MARK: - Send Data
     func send(data: String) {
+        print(data)
         guard let characteristic = targetCharacteristic,
               let peripheral = connectedPeripheral else { return }
         
         let dataToSend = Data(data.utf8)
         peripheral.writeValue(dataToSend, for: characteristic, type: .withResponse)
+        
     }
     
     
@@ -124,6 +149,44 @@ class BLEManager: NSObject, ObservableObject, CBCentralManagerDelegate, CBPeriph
                     error: Error?) {
         guard error == nil, let data = characteristic.value else { return }
         received = data
-        
+        decodeAndUpdate(with: data)
+    }
+    
+    func decodeAndUpdate(with data: Data) {
+        guard let string = String(data: data, encoding: .ascii)?.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        let parts = string.split(separator: ";").map { String($0) }
+        if parts.count == 3, let type = parts.first {
+            if type == "0" {
+                // Door: 0;distance;motion
+                if let dist = Double(parts[1]), let motion = Bool(parts[2]) {
+                    doorUltrasonicCM = dist
+                    doorMotionDetected = motion
+                }
+            } else if type == "1" {
+                // Temp: 1;temp;humidity
+                if let temp = Double(parts[1]), let hum = Double(parts[2]) {
+                    temperatureDegrees = temp
+                    humidityPercent = hum
+                }
+            }
+        } else if parts.count == 1 {
+            if parts[0] == "0" {
+                singleBinaryFlag = false
+            } else if parts[0] == "1" {
+                singleBinaryFlag = true
+            }
+        }
+    }
+}
+
+// bool extension because FRICK YOU
+
+private extension Bool {
+    init?(_ value: String) {
+        switch value.lowercased() {
+        case "true", "1": self = true
+        case "false", "0": self = false
+        default: return nil
+        }
     }
 }

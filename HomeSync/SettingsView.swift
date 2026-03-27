@@ -54,6 +54,14 @@ struct SettingsView: View {
                     }
                     .disabled(!bleManager.finishedScan)
                 }
+                ToolbarItem {
+                    Button {
+                        bleManager.disconnect()
+                    } label: {
+                        Text("Disconnect")
+                    }
+                    // .disabled()
+                }
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button {
                         showSettings.toggle()
